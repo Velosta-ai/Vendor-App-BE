@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BikeStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+}
+
+enum BookingStatus {
+  UPCOMING
+  ACTIVE
+  RETURNED
+}
+
+model Bike {
+  id                 String    @id @default(uuid())
+  name               String
+  model              String?
+  registrationNumber String    @unique
+  year               Int?
+  dailyRate          Float
+  status             BikeStatus @default(AVAILABLE)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  bookings Booking[]
+}
+
+model Booking {
+  id            String   @id @default(uuid())
+  customerName  String
+  phone         String
+  startDate     DateTime
+  endDate       DateTime
+  totalAmount   Float
+  paidAmount    Float
+  notes         String?
+  status        BookingStatus @default(UPCOMING)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bike   Bike   @relation(fields: [bikeId], references: [id])
+  bikeId String
+}
+
+model Lead {
+  id        Int      @id @default(autoincrement())
+  phone     String
+  message   String?
+  source    String    @default("manual")
+  status    String    @default("new")
+  timestamp DateTime  @default(now())
+}
