@@ -5,8 +5,10 @@ import {
   updateLeadStatus,
   deleteLead,
 } from "../controllers/leads.controller.js";
+import { authenticate } from "../middlewares/auth.middleware.js";
 
 const router = Router();
+router.use(authenticate);
 
 // POST /leads → add new manual lead
 router.post("/", createLead);

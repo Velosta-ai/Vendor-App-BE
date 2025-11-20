@@ -19,22 +19,64 @@ enum BookingStatus {
   RETURNED
 }
 
+enum Role {
+  ADMIN
+  STAFF
+}
+
+//
+// ─── ORGANIZATION & ACCOUNTS ───────────────────────────────────────────
+//
+
+model Organization {
+  id          String    @id @default(uuid())
+  name        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  inviteCode  String    @unique
+  accounts    Account[]
+  bikes       Bike[]
+  bookings    Booking[]
+  leads       Lead[]
+}
+
+model Account {
+  id             String        @id @default(uuid())
+  name           String
+  email          String        @unique
+  passwordHash   String
+  role           Role          @default(STAFF)
+  phone          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  organizationId String
+}
+
+//
+// ─── BIKE RENTAL MODULE ───────────────────────────────────────────────
+//
+
 model Bike {
-  id                 String    @id @default(uuid())
+  id                 String      @id @default(uuid())
   name               String
   model              String?
-  registrationNumber String    @unique
+  registrationNumber String      @unique
   year               Int?
   dailyRate          Float
-  status             BikeStatus @default(AVAILABLE)
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  status             BikeStatus  @default(AVAILABLE)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
-  bookings Booking[]
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  organizationId     String
+
+  bookings           Booking[]
 }
 
 model Booking {
-  id            String   @id @default(uuid())
+  id            String        @id @default(uuid())
   customerName  String
   phone         String
   startDate     DateTime
@@ -43,18 +85,24 @@ model Booking {
   paidAmount    Float
   notes         String?
   status        BookingStatus @default(UPCOMING)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  bike   Bike   @relation(fields: [bikeId], references: [id])
-  bikeId String
+  bike          Bike          @relation(fields: [bikeId], references: [id])
+  bikeId        String
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  organizationId String
 }
 
 model Lead {
-  id        Int      @id @default(autoincrement())
-  phone     String
-  message   String?
-  source    String    @default("manual")
-  status    String    @default("new")
-  timestamp DateTime  @default(now())
+  id            Int           @id @default(autoincrement())
+  phone         String
+  message       String?
+  source        String        @default("manual")
+  status        String        @default("new")
+  timestamp     DateTime      @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  organizationId String
 }
