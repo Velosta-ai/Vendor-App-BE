@@ -215,47 +215,106 @@ export const getBikeAvailability = async (req, res) => {
     if (!bike || bike.organizationId !== orgId)
       return res.status(404).json({ error: "Bike not found" });
 
-    // Fix status based on bookings
-    const correctedStatus = await autoFixBikeStatus(bikeId, orgId);
-
+    // Fetch all future+current bookings
     const bookings = await prisma.booking.findMany({
       where: {
         bikeId,
         organizationId: orgId,
         status: { in: ["ACTIVE", "UPCOMING"] },
-        endDate: { gte: now },
+        endDate: { gte: now }, // relevant bookings
       },
       orderBy: { startDate: "asc" },
     });
 
+    // 1️⃣ NO BOOKINGS → ALWAYS AVAILABLE
     if (bookings.length === 0) {
       return res.json({
         bikeId,
         isAvailableNow: true,
-        nextAvailableDate: null,
         currentBooking: null,
+        nextBooking: null,
+        nextAvailableDate: now.toISOString(),
         returnInDays: 0,
       });
     }
 
+    // 2️⃣ FIND CURRENT BOOKING (if overlaps NOW)
     const currentBooking =
       bookings.find(
         (b) => new Date(b.startDate) <= now && new Date(b.endDate) >= now
       ) || null;
 
-    const lastEnd = new Date(bookings[bookings.length - 1].endDate);
+    // 3️⃣ FIND NEXT BOOKING (that starts AFTER NOW)
+    const nextBooking =
+      bookings.find((b) => new Date(b.startDate) > now) || null;
 
-    const returnInDays = Math.ceil((lastEnd - now) / (1000 * 60 * 60 * 24));
+    // 4️⃣ BIKE IS AVAILABLE NOW IF NO CURRENT BOOKING
+    const isAvailableNow = currentBooking === null;
+
+    // 5️⃣ nextAvailableDate logic
+    let nextAvailableDate;
+
+    if (isAvailableNow) {
+      // Bike is free now → available today
+      nextAvailableDate = now.toISOString();
+    } else {
+      // Bike is rented → available after current booking ends
+      nextAvailableDate = new Date(currentBooking.endDate).toISOString();
+    }
+
+    // 6️⃣ returnInDays ONLY IF THE BIKE IS CURRENTLY RENTED
+    const returnInDays = currentBooking
+      ? Math.ceil(
+          (new Date(currentBooking.endDate) - now) / (1000 * 60 * 60 * 24)
+        )
+      : 0;
 
     return res.json({
       bikeId,
-      isAvailableNow: correctedStatus === "AVAILABLE" && !currentBooking,
-      nextAvailableDate: lastEnd.toISOString(),
+      isAvailableNow,
       currentBooking,
+      nextBooking,
+      nextAvailableDate,
       returnInDays,
     });
   } catch (err) {
     console.error("getBikeAvailability error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const toggleBikeMaintenance = async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const bikeId = req.params.id;
+
+    const bike = await prisma.bike.findUnique({ where: { id: bikeId } });
+
+    if (!bike || bike.organizationId !== orgId) {
+      return res.status(404).json({ error: "Bike not found" });
+    }
+
+    // Cannot place bike into maintenance if rented
+    if (bike.status === "RENTED") {
+      return res.status(400).json({
+        error: "Bike is currently rented. Cannot switch to maintenance.",
+      });
+    }
+
+    const newStatus =
+      bike.status === "MAINTENANCE" ? "AVAILABLE" : "MAINTENANCE";
+
+    const updated = await prisma.bike.update({
+      where: { id: bikeId },
+      data: { status: newStatus },
+    });
+
+    return res.json({
+      message: "Bike status updated",
+      bike: updated,
+    });
+  } catch (err) {
+    console.error("toggleBikeMaintenance error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };

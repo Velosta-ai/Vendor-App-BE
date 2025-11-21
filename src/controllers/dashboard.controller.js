@@ -1,4 +1,4 @@
-import prisma from "../../config/prismaClient.js";
+import prisma from "../config/prisma.js";
 
 export const getDashboard = async (req, res) => {
   try {
