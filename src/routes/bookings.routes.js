@@ -7,8 +7,10 @@ import {
   markReturned,
   deleteBooking,
 } from "../controllers/bookings.controller.js";
+import { authenticate } from "../middlewares/auth.middleware.js";
 
 const router = Router();
+router.use(authenticate);
 
 router.get("/", getBookings);
 router.get("/:id", getBookingById);
