@@ -2,7 +2,7 @@ import prisma from "../config/prisma.js";
 
 export const createLead = async (req, res) => {
   try {
-    console.log("hii");
+    const orgId = req.organizationId;
     const { phone, message, source } = req.body;
 
     if (!phone) {
@@ -15,6 +15,7 @@ export const createLead = async (req, res) => {
         message: message || "",
         source: source || "manual",
         status: "new",
+        organizationId: orgId,
       },
     });
 
@@ -25,10 +26,13 @@ export const createLead = async (req, res) => {
   }
 };
 
-/** GET ALL LEADS */
+/** GET ALL LEADS (ORG SCOPED) */
 export const getLeads = async (req, res) => {
   try {
+    const orgId = req.organizationId;
+
     const leads = await prisma.lead.findMany({
+      where: { organizationId: orgId },
       orderBy: { timestamp: "desc" },
     });
 
@@ -41,11 +45,21 @@ export const getLeads = async (req, res) => {
 
 export const updateLeadStatus = async (req, res) => {
   try {
+    const orgId = req.organizationId;
     const { id } = req.params;
     const { status } = req.body;
 
     if (!status) {
       return res.status(400).json({ error: "Status is required" });
+    }
+
+    // Verify lead belongs to organization
+    const lead = await prisma.lead.findFirst({
+      where: { id: Number(id), organizationId: orgId },
+    });
+
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
     }
 
     const updated = await prisma.lead.update({
@@ -60,11 +74,23 @@ export const updateLeadStatus = async (req, res) => {
   }
 };
 
-/** DELETE LEAD */
+/** DELETE LEAD (ORG SCOPED) */
 export const deleteLead = async (req, res) => {
   try {
+    const orgId = req.organizationId;
+    const id = Number(req.params.id);
+
+    // Verify lead belongs to organization
+    const lead = await prisma.lead.findFirst({
+      where: { id, organizationId: orgId },
+    });
+
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
     await prisma.lead.delete({
-      where: { id: Number(req.params.id) },
+      where: { id },
     });
 
     return res.json({ message: "Lead deleted" });
