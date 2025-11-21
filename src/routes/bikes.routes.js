@@ -7,6 +7,7 @@ import {
   updateBikeStatus,
   getBikeAvailability,
   toggleBikeMaintenance,
+  deleteBike,
 } from "../controllers/bikes.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
 
@@ -20,5 +21,6 @@ router.put("/:id", updateBike);
 router.patch("/:id/status", updateBikeStatus);
 router.get("/:id/availability", getBikeAvailability);
 router.patch("/:id/maintenance", toggleBikeMaintenance);
+router.delete("/:id", deleteBike);
 
 export default router;

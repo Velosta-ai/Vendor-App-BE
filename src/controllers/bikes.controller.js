@@ -100,34 +100,55 @@ export const createBike = async (req, res) => {
     const orgId = req.organizationId;
     const { name, model, registrationNumber, year, dailyRate } = req.body;
 
-    if (!name || !dailyRate)
-      return res.status(400).json({ error: "Name & dailyRate are required" });
+    // Validate required fields
+    if (!name || !registrationNumber || !dailyRate) {
+      return res.status(400).json({ 
+        error: "Name, registration number and daily rate are required" 
+      });
+    }
 
-    // Unique reg number inside org
+    // Validate dailyRate is a positive number
+    const rate = Number(dailyRate);
+    if (isNaN(rate) || rate <= 0) {
+      return res.status(400).json({ 
+        error: "Daily rate must be a positive number" 
+      });
+    }
+
+    // Check if registration number already exists in this org
     const exists = await prisma.bike.findFirst({
       where: { registrationNumber, organizationId: orgId },
     });
 
-    if (exists)
-      return res
-        .status(409)
-        .json({ error: "Registration number already exists" });
+    if (exists) {
+      return res.status(409).json({ 
+        error: "Registration number already exists in your organization" 
+      });
+    }
 
     const bike = await prisma.bike.create({
       data: {
         name,
-        model,
+        model: model || null,
         registrationNumber,
         year: year ? Number(year) : null,
-        dailyRate: Number(dailyRate),
+        dailyRate: rate,
         status: "AVAILABLE",
         organizationId: orgId,
       },
     });
 
-    res.json(bike);
+    res.status(201).json(bike);
   } catch (err) {
     console.error("Error creating bike:", err);
+    
+    // Handle Prisma unique constraint violations
+    if (err.code === 'P2002') {
+      return res.status(409).json({ 
+        error: "Registration number already exists" 
+      });
+    }
+    
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -150,15 +171,42 @@ export const updateBike = async (req, res) => {
     const { name, model, registrationNumber, year, dailyRate, status } =
       req.body;
 
+    // If registrationNumber is being changed, check for duplicates
+    if (registrationNumber && registrationNumber !== exists.registrationNumber) {
+      const duplicate = await prisma.bike.findFirst({
+        where: { 
+          registrationNumber, 
+          organizationId: orgId,
+          id: { not: id }
+        },
+      });
+
+      if (duplicate) {
+        return res.status(409).json({ 
+          error: "Registration number already exists in your organization" 
+        });
+      }
+    }
+
+    // Validate dailyRate if provided
+    if (dailyRate !== undefined) {
+      const rate = Number(dailyRate);
+      if (isNaN(rate) || rate <= 0) {
+        return res.status(400).json({ 
+          error: "Daily rate must be a positive number" 
+        });
+      }
+    }
+
     const bike = await prisma.bike.update({
       where: { id },
       data: {
-        name,
-        model,
-        registrationNumber,
-        year: year ? Number(year) : null,
-        dailyRate: dailyRate ? Number(dailyRate) : undefined,
-        status,
+        ...(name && { name }),
+        ...(model !== undefined && { model }),
+        ...(registrationNumber && { registrationNumber }),
+        ...(year && { year: Number(year) }),
+        ...(dailyRate && { dailyRate: Number(dailyRate) }),
+        ...(status && { status }),
       },
     });
 
@@ -167,6 +215,14 @@ export const updateBike = async (req, res) => {
     res.json(bike);
   } catch (err) {
     console.error("Error updating bike:", err);
+    
+    // Handle Prisma unique constraint violations
+    if (err.code === 'P2002') {
+      return res.status(409).json({ 
+        error: "Registration number already exists" 
+      });
+    }
+    
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -315,6 +371,43 @@ export const toggleBikeMaintenance = async (req, res) => {
     });
   } catch (err) {
     console.error("toggleBikeMaintenance error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/**
+ * DELETE BIKE
+ */
+export const deleteBike = async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const { id } = req.params;
+
+    // Validate ownership
+    const exists = await prisma.bike.findFirst({
+      where: { id, organizationId: orgId },
+      include: { bookings: true },
+    });
+
+    if (!exists) return res.status(404).json({ error: "Bike not found" });
+
+    // Check if bike has any active or upcoming bookings
+    const activeBookings = exists.bookings.filter(
+      (b) => b.status === "ACTIVE" || b.status === "UPCOMING"
+    );
+
+    if (activeBookings.length > 0) {
+      return res.status(400).json({
+        error: "Cannot delete bike with active or upcoming bookings",
+      });
+    }
+
+    // Delete the bike
+    await prisma.bike.delete({ where: { id } });
+
+    res.json({ message: "Bike deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting bike:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
