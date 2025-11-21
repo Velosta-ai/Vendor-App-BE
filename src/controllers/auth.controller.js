@@ -90,7 +90,10 @@ export async function login(req, res, next) {
     if (!email || !password)
       return res.status(400).json({ message: "Missing email or password" });
 
-    const account = await prisma.account.findUnique({ where: { email } });
+    const account = await prisma.account.findUnique({ 
+      where: { email },
+      include: { organization: true }
+    });
 
     if (!account)
       return res.status(401).json({ message: "Invalid credentials" });
@@ -110,6 +113,10 @@ export async function login(req, res, next) {
 
     return res.json({
       token,
+      organization: {
+        id: account.organization.id,
+        name: account.organization.name,
+      },
       account: {
         id: account.id,
         name: account.name,
