@@ -5,6 +5,12 @@ export const getDashboard = async (req, res) => {
     const orgId = req.organizationId;
     const now = new Date();
 
+    // Get organization details
+    const organization = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, name: true },
+    });
+
     // ───────────────────────────────────────────────
     // BIKES SUMMARY
     // ───────────────────────────────────────────────
@@ -93,6 +99,10 @@ export const getDashboard = async (req, res) => {
     // RESPONSE
     // ───────────────────────────────────────────────
     res.json({
+      organization: {
+        id: organization.id,
+        name: organization.name,
+      },
       bikes: {
         total: totalBikes,
         available: availableBikes,
