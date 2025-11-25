@@ -2,14 +2,17 @@ import prisma from "../config/prisma.js";
 
 export const getDashboard = async (req, res) => {
   try {
+    console.log("hola");
     const orgId = req.organizationId;
+    console.log("Organization ID:", orgId);
     const now = new Date();
 
     // Get organization details
     const organization = await prisma.organization.findUnique({
       where: { id: orgId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, inviteCode: true },
     });
+    console.log("Organization:", organization);
 
     // ───────────────────────────────────────────────
     // BIKES SUMMARY
@@ -126,6 +129,31 @@ export const getDashboard = async (req, res) => {
     });
   } catch (err) {
     console.error("Dashboard error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const getSettingDetails = async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+
+    // Get organization settings
+    const organization = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: {
+        name: true,
+        inviteCode: true,
+        accounts: true,
+      },
+    });
+
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    res.json({ organization });
+  } catch (err) {
+    console.error("Get Setting Details error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
