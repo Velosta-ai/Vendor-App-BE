@@ -117,7 +117,7 @@ const computeAvailability = async (bikeId, orgId) => {
     }
     const last = merged[merged.length - 1];
     // if r.start is <= last.end + 1ms (overlap/contiguous) -> merge
-    if (r.start.getTime() <= last.end.getTime() + 1) {
+    if (r.start.getTime() <= last.end.getTime()) {
       if (r.end > last.end) last.end = r.end;
       last.ids.push(r.id);
       last.raws.push(r.raw);
