@@ -5,6 +5,7 @@ import env from "../config/env.js";
 export async function authenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
+    console.log("unauthh middle");
 
     if (!authHeader) return res.status(401).json({ message: "Unauthorized" });
 
@@ -16,6 +17,7 @@ export async function authenticate(req, res, next) {
     const account = await prisma.account.findUnique({
       where: { id: payload.accountId },
     });
+    console.log("unauth");
 
     if (!account) return res.status(401).json({ message: "Unauthorized" });
 
@@ -25,6 +27,7 @@ export async function authenticate(req, res, next) {
 
     next();
   } catch (err) {
+    console.log(err, "middle");
     return res.status(401).json({ message: "Unauthorized" });
   }
 }

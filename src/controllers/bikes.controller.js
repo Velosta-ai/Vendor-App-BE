@@ -40,6 +40,7 @@ async function autoFixBikeStatus(bikeId, orgId) {
 export const getBikes = async (req, res) => {
   try {
     const orgId = req.organizationId;
+    console.log(orgId);
 
     const bikes = await prisma.bike.findMany({
       where: { organizationId: orgId },
@@ -102,16 +103,16 @@ export const createBike = async (req, res) => {
 
     // Validate required fields
     if (!name || !registrationNumber || !dailyRate) {
-      return res.status(400).json({ 
-        error: "Name, registration number and daily rate are required" 
+      return res.status(400).json({
+        error: "Name, registration number and daily rate are required",
       });
     }
 
     // Validate dailyRate is a positive number
     const rate = Number(dailyRate);
     if (isNaN(rate) || rate <= 0) {
-      return res.status(400).json({ 
-        error: "Daily rate must be a positive number" 
+      return res.status(400).json({
+        error: "Daily rate must be a positive number",
       });
     }
 
@@ -121,8 +122,8 @@ export const createBike = async (req, res) => {
     });
 
     if (exists) {
-      return res.status(409).json({ 
-        error: "Registration number already exists in your organization" 
+      return res.status(409).json({
+        error: "Registration number already exists in your organization",
       });
     }
 
@@ -141,14 +142,14 @@ export const createBike = async (req, res) => {
     res.status(201).json(bike);
   } catch (err) {
     console.error("Error creating bike:", err);
-    
+
     // Handle Prisma unique constraint violations
-    if (err.code === 'P2002') {
-      return res.status(409).json({ 
-        error: "Registration number already exists" 
+    if (err.code === "P2002") {
+      return res.status(409).json({
+        error: "Registration number already exists",
       });
     }
-    
+
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -172,18 +173,21 @@ export const updateBike = async (req, res) => {
       req.body;
 
     // If registrationNumber is being changed, check for duplicates
-    if (registrationNumber && registrationNumber !== exists.registrationNumber) {
+    if (
+      registrationNumber &&
+      registrationNumber !== exists.registrationNumber
+    ) {
       const duplicate = await prisma.bike.findFirst({
-        where: { 
-          registrationNumber, 
+        where: {
+          registrationNumber,
           organizationId: orgId,
-          id: { not: id }
+          id: { not: id },
         },
       });
 
       if (duplicate) {
-        return res.status(409).json({ 
-          error: "Registration number already exists in your organization" 
+        return res.status(409).json({
+          error: "Registration number already exists in your organization",
         });
       }
     }
@@ -192,8 +196,8 @@ export const updateBike = async (req, res) => {
     if (dailyRate !== undefined) {
       const rate = Number(dailyRate);
       if (isNaN(rate) || rate <= 0) {
-        return res.status(400).json({ 
-          error: "Daily rate must be a positive number" 
+        return res.status(400).json({
+          error: "Daily rate must be a positive number",
         });
       }
     }
@@ -215,14 +219,14 @@ export const updateBike = async (req, res) => {
     res.json(bike);
   } catch (err) {
     console.error("Error updating bike:", err);
-    
+
     // Handle Prisma unique constraint violations
-    if (err.code === 'P2002') {
-      return res.status(409).json({ 
-        error: "Registration number already exists" 
+    if (err.code === "P2002") {
+      return res.status(409).json({
+        error: "Registration number already exists",
       });
     }
-    
+
     res.status(500).json({ error: "Server error" });
   }
 };
