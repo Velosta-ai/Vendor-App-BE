@@ -17,11 +17,20 @@ enum BookingStatus {
   UPCOMING
   ACTIVE
   RETURNED
+  CANCELLED
 }
 
 enum Role {
   ADMIN
+  MANAGER
   STAFF
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
 }
 
 //
@@ -31,6 +40,8 @@ enum Role {
 model Organization {
   id          String    @id @default(uuid())
   name        String
+  plan        String    @default("free") // free, basic, premium
+  bikesLimit  Int       @default(10)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   inviteCode  String    @unique
@@ -47,11 +58,57 @@ model Account {
   passwordHash   String
   role           Role          @default(STAFF)
   phone          String?
+  fcmToken       String?       // For push notifications
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+  isActive       Boolean       @default(true)
 
   organization   Organization  @relation(fields: [organizationId], references: [id])
   organizationId String
+
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordReset[]
+}
+
+//
+// ─── AUTH TOKENS ───────────────────────────────────────────────────────
+//
+
+model RefreshToken {
+  id          String    @id @default(uuid())
+  token       String    @unique
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  replacedBy  String?   // ID of the token that replaced this one (for rotation)
+
+  @@index([accountId])
+  @@index([token])
+}
+
+model BlacklistedToken {
+  id          String    @id @default(uuid())
+  token       String    @unique
+  expiresAt   DateTime  // When the original token expires (for cleanup)
+  createdAt   DateTime  @default(now())
+
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model PasswordReset {
+  id          String    @id @default(uuid())
+  otp         String
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([accountId])
+  @@index([otp])
 }
 
 //
@@ -66,6 +123,9 @@ model Bike {
   year               Int?
   dailyRate          Float
   status             BikeStatus  @default(AVAILABLE)
+  images             String[]    @default([])
+  isDeleted          Boolean     @default(false)
+  deletedAt          DateTime?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
@@ -73,6 +133,40 @@ model Bike {
   organizationId     String
 
   bookings           Booking[]
+  documents          BikeDocument[]
+  maintenanceLogs    MaintenanceLog[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model BikeDocument {
+  id          String    @id @default(uuid())
+  bikeId      String
+  bike        Bike      @relation(fields: [bikeId], references: [id], onDelete: Cascade)
+  type        String    // RC, INSURANCE, PUC, etc.
+  url         String
+  expiryDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([bikeId])
+  @@index([expiryDate])
+}
+
+model MaintenanceLog {
+  id          String    @id @default(uuid())
+  bikeId      String
+  bike        Bike      @relation(fields: [bikeId], references: [id], onDelete: Cascade)
+  type        String    // SERVICE, REPAIR, INSPECTION, etc.
+  description String?
+  cost        Float     @default(0)
+  date        DateTime  @default(now())
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([bikeId])
+  @@index([date])
 }
 
 model Booking {
@@ -85,6 +179,15 @@ model Booking {
   paidAmount    Float
   notes         String?
   status        BookingStatus @default(UPCOMING)
+  
+  // Payment tracking
+  paymentMethod PaymentMethod?
+  paymentNotes  String?
+  
+  // Soft delete
+  isDeleted     Boolean       @default(false)
+  deletedAt     DateTime?
+  
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -93,6 +196,26 @@ model Booking {
 
   organization  Organization  @relation(fields: [organizationId], references: [id])
   organizationId String
+  
+  payments      Payment[]
+
+  @@index([organizationId])
+  @@index([bikeId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  bookingId   String
+  booking     Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      PaymentMethod
+  date        DateTime      @default(now())
+  notes       String?
+  createdAt   DateTime      @default(now())
+
+  @@index([bookingId])
 }
 
 model Lead {
@@ -100,9 +223,34 @@ model Lead {
   phone         String
   message       String?
   source        String        @default("manual")
-  status        String        @default("new")
+  status        String        @default("new") // new, contacted, in_progress, converted, lost
   timestamp     DateTime      @default(now())
 
   organization  Organization  @relation(fields: [organizationId], references: [id])
   organizationId String
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+//
+// ─── AUDIT LOG ─────────────────────────────────────────────────────────
+//
+
+model AuditLog {
+  id          String    @id @default(uuid())
+  action      String    // CREATE, UPDATE, DELETE, LOGIN, LOGOUT, etc.
+  entityType  String    // BIKE, BOOKING, ACCOUNT, etc.
+  entityId    String?
+  accountId   String?
+  organizationId String
+  changes     Json?     // JSON diff of changes
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
