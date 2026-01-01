@@ -455,47 +455,80 @@ export const updateBooking = async (req, res) => {
       normalizedPhone = phoneValidation.normalized;
     }
 
-    // normalize provided dates, fallback to existing
-    let newStart = rawStart
-      ? startOfDay(new Date(rawStart))
-      : startOfDay(existing.startDate);
-    let newEnd = rawEnd ? endOfDay(new Date(rawEnd)) : endOfDay(existing.endDate);
+    // Only validate dates if they're being updated
+    const isUpdatingDates = rawStart !== undefined || rawEnd !== undefined;
+    let newStart = existing.startDate;
+    let newEnd = existing.endDate;
+    let datesChanged = false;
 
-    if (newStart < today()) {
-      return errorResponse(res, "Start date cannot be in the past", ERROR_CODES.PAST_DATE, 400);
-    }
-    if (newEnd < newStart) {
-      return errorResponse(
-        res,
-        "End date must be after start date",
-        ERROR_CODES.INVALID_DATE_RANGE,
-        400
-      );
-    }
+    if (isUpdatingDates) {
+      // normalize provided dates, fallback to existing for the one not provided
+      const proposedStart = rawStart
+        ? startOfDay(new Date(rawStart))
+        : startOfDay(existing.startDate);
+      const proposedEnd = rawEnd ? endOfDay(new Date(rawEnd)) : endOfDay(existing.endDate);
 
-    // Overlap check excluding this booking
-    const overlap = await prisma.booking.findFirst({
-      where: {
-        bikeId: existing.bikeId,
-        organizationId: orgId,
-        id: { not: id },
-        status: { in: ["ACTIVE", "UPCOMING"] },
-        isDeleted: false,
-        AND: [{ startDate: { lte: newEnd } }, { endDate: { gte: newStart } }],
-      },
-    });
+      // Check if dates actually changed
+      datesChanged = 
+        (rawStart !== undefined && proposedStart.getTime() !== startOfDay(existing.startDate).getTime()) ||
+        (rawEnd !== undefined && proposedEnd.getTime() !== endOfDay(existing.endDate).getTime());
 
-    if (overlap) {
-      const availability = await computeAvailability(existing.bikeId, orgId);
-      return res.status(400).json({
-        success: false,
-        error: "Bike not available for selected dates",
-        code: ERROR_CODES.BOOKING_OVERLAP,
-        nextAvailableDate: availability.nextAvailableDate,
-        details: {
-          returnInDays: availability.returnInDays,
-        },
-      });
+      // Only validate if dates are actually being changed
+      if (datesChanged) {
+        newStart = proposedStart;
+        newEnd = proposedEnd;
+
+        // Only validate "cannot be in the past" if start date is being changed to a NEW past date
+        // Allow keeping existing past dates (for existing bookings)
+        if (rawStart !== undefined) {
+          const existingStartDay = startOfDay(existing.startDate);
+          const isChangingStartDate = proposedStart.getTime() !== existingStartDay.getTime();
+          
+          // Only block if changing to a past date (not if keeping existing past date)
+          if (isChangingStartDate && proposedStart < today()) {
+            return errorResponse(res, "Start date cannot be in the past", ERROR_CODES.PAST_DATE, 400);
+          }
+        }
+        
+        // Validate date range
+        if (newEnd < newStart) {
+          return errorResponse(
+            res,
+            "End date must be after start date",
+            ERROR_CODES.INVALID_DATE_RANGE,
+            400
+          );
+        }
+
+        // Overlap check only if dates are actually being changed
+        const overlap = await prisma.booking.findFirst({
+          where: {
+            bikeId: existing.bikeId,
+            organizationId: orgId,
+            id: { not: id },
+            status: { in: ["ACTIVE", "UPCOMING"] },
+            isDeleted: false,
+            AND: [{ startDate: { lte: newEnd } }, { endDate: { gte: newStart } }],
+          },
+        });
+
+        if (overlap) {
+          const availability = await computeAvailability(existing.bikeId, orgId);
+          return res.status(400).json({
+            success: false,
+            error: "Bike not available for selected dates",
+            code: ERROR_CODES.BOOKING_OVERLAP,
+            nextAvailableDate: availability.nextAvailableDate,
+            details: {
+              returnInDays: availability.returnInDays,
+            },
+          });
+        }
+      } else {
+        // Dates provided but unchanged - use existing dates
+        newStart = existing.startDate;
+        newEnd = existing.endDate;
+      }
     }
 
     const updated = await prisma.booking.update({

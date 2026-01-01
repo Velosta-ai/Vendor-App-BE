@@ -107,29 +107,49 @@ export const getDashboard = async (req, res) => {
     });
 
     // ───────────────────────────────────────────────
-    // BOOKINGS SUMMARY
+    // BOOKINGS SUMMARY (based on dates, not status)
     // ───────────────────────────────────────────────
-    const activeBookings = await prisma.booking.count({
-      where: { organizationId: orgId, status: "ACTIVE", isDeleted: false },
-    });
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-    const upcomingBookings = await prisma.booking.count({
-      where: { organizationId: orgId, status: "UPCOMING", isDeleted: false },
-    });
-
-    // Pending returns = ACTIVE bookings where endDate < now
-    const pendingReturns = await prisma.booking.count({
+    // Get all non-returned bookings to categorize by dates
+    const allBookings = await prisma.booking.findMany({
       where: {
         organizationId: orgId,
-        status: "ACTIVE",
+        status: { in: ["ACTIVE", "UPCOMING"] },
         isDeleted: false,
-        endDate: { lt: now },
+      },
+      select: {
+        startDate: true,
+        endDate: true,
       },
     });
 
-    // Start of today
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    // Categorize bookings based on dates (matches frontend logic)
+    let activeBookings = 0;
+    let upcomingBookings = 0;
+    let pendingReturns = 0;
+
+    allBookings.forEach((booking) => {
+      const startDate = new Date(booking.startDate);
+      const endDate = new Date(booking.endDate);
+      const startDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const endDay = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+      const today = todayStart;
+
+      if (startDay > today) {
+        // Start date is in the future → UPCOMING
+        upcomingBookings++;
+      } else if (endDay < today) {
+        // End date has passed but not returned → ACTIVE (overdue/pending return)
+        activeBookings++;
+        pendingReturns++;
+      } else {
+        // startDay <= today && endDay >= today → ACTIVE
+        activeBookings++;
+      }
+    });
+
 
     // Returned today
     const returnedToday = await prisma.booking.count({
