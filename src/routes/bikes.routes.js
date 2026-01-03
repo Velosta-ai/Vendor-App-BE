@@ -10,6 +10,7 @@ import {
   deleteBike,
   addMaintenanceLog,
   addBikeDocument,
+  deleteBikeDocument,
   getExpiringDocuments,
 } from "../controllers/bikes.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
@@ -48,6 +49,9 @@ router.post("/:id/maintenance-log", addMaintenanceLog);
 
 // POST /api/bikes/:id/documents - Add document (RC, Insurance, etc.)
 router.post("/:id/documents", addBikeDocument);
+
+// DELETE /api/bikes/:id/documents/:documentId - Delete bike document
+router.delete("/:id/documents/:documentId", deleteBikeDocument);
 
 // DELETE /api/bikes/:id - Soft delete bike
 router.delete("/:id", deleteBike);

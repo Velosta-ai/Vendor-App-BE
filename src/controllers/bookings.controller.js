@@ -280,7 +280,11 @@ export const getBookingById = async (req, res) => {
         isDeleted: false,
       },
       include: {
-        bike: true,
+        bike: {
+          include: {
+            documents: true, // Include bike documents for WhatsApp sharing
+          },
+        },
         payments: {
           orderBy: { date: "desc" },
         },

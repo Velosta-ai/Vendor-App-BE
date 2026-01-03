@@ -120,6 +120,9 @@ export const getBikes = async (req, res) => {
             isDeleted: false,
           },
         },
+        documents: {
+          orderBy: { createdAt: "desc" },
+        },
       },
       orderBy: { createdAt: "desc" },
       skip,
@@ -613,6 +616,43 @@ export const addBikeDocument = async (req, res) => {
     return successResponse(res, doc, "Document added", 201);
   } catch (err) {
     console.error("Error adding bike document:", err);
+    return serverErrorResponse(res, err);
+  }
+};
+
+/**
+ * DELETE BIKE DOCUMENT
+ */
+export const deleteBikeDocument = async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const { id, documentId } = req.params;
+
+    // Verify bike belongs to organization
+    const bike = await prisma.bike.findFirst({
+      where: { id, organizationId: orgId, isDeleted: false },
+    });
+
+    if (!bike) {
+      return notFoundResponse(res, "Bike");
+    }
+
+    // Verify document belongs to bike
+    const doc = await prisma.bikeDocument.findFirst({
+      where: { id: documentId, bikeId: id },
+    });
+
+    if (!doc) {
+      return notFoundResponse(res, "Document");
+    }
+
+    await prisma.bikeDocument.delete({
+      where: { id: documentId },
+    });
+
+    return successResponse(res, null, "Document deleted");
+  } catch (err) {
+    console.error("Error deleting bike document:", err);
     return serverErrorResponse(res, err);
   }
 };
