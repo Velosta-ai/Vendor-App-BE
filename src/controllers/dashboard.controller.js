@@ -49,6 +49,16 @@ async function autoFixBikeStatus(bikeId, orgId) {
 }
 
 /**
+ * Process items in batches to avoid exhausting database connections
+ */
+async function processBatch(items, batchSize, asyncFn) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await Promise.all(batch.map(asyncFn));
+  }
+}
+
+/**
  * Sync all bike statuses for an organization
  */
 async function syncAllBikeStatuses(orgId) {
@@ -57,7 +67,8 @@ async function syncAllBikeStatuses(orgId) {
     select: { id: true },
   });
 
-  await Promise.all(bikes.map((b) => autoFixBikeStatus(b.id, orgId)));
+  // Process in batches of 5 to avoid exhausting DB connections
+  await processBatch(bikes, 5, (b) => autoFixBikeStatus(b.id, orgId));
 }
 
 export const getDashboard = async (req, res) => {

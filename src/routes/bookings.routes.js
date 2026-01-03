@@ -4,6 +4,7 @@ import {
   getBookingById,
   createBooking,
   updateBooking,
+  deliverBike,
   markReturned,
   bulkMarkReturned,
   deleteBooking,
@@ -26,6 +27,9 @@ router.post("/", createBooking);
 
 // PUT /api/bookings/:id - Update booking
 router.put("/:id", updateBooking);
+
+// PATCH /api/bookings/:id/deliver - Deliver bike (record handover details)
+router.patch("/:id/deliver", deliverBike);
 
 // PATCH /api/bookings/:id/returned - Mark booking as returned
 router.patch("/:id/returned", markReturned);

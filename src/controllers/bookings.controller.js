@@ -81,22 +81,23 @@ const autoFixBikeStatus = async (bikeId, orgId) => {
 
 /**
  * computeAvailability:
- * - merges overlapping/contiguous bookings (for blocking chain)
- * - returns whether bike is available right now (no current booking)
- * - returns nextAvailableDate = day after the blocking chain end if there's a chain that blocks now
- * - returns returnInDays and blockingBookings (merged chain)
+ * - Finds all existing bookings for the bike
+ * - Determines if bike is available NOW
+ * - Finds the next TRULY available date (considering ALL existing bookings)
+ * - Returns current booking info and blocking bookings
  */
 const computeAvailability = async (bikeId, orgId) => {
   const now = new Date();
+  const todayStart = startOfDay(now);
 
-  // fetch bookings that end today or later and are ACTIVE/UPCOMING
+  // Fetch all active/upcoming bookings for this bike
   const bookings = await prisma.booking.findMany({
     where: {
       bikeId,
       organizationId: orgId,
       status: { in: ["ACTIVE", "UPCOMING"] },
       isDeleted: false,
-      endDate: { gte: startOfDay(now) }, // any booking that can block now or future
+      endDate: { gte: todayStart }, // relevant bookings
     },
     orderBy: { startDate: "asc" },
   });
@@ -112,51 +113,67 @@ const computeAvailability = async (bikeId, orgId) => {
     };
   }
 
-  // convert to normalized ranges (start = startOfDay, end = endOfDay)
-  const ranges = bookings.map((b) => ({
-    id: b.id,
-    start: startOfDay(b.startDate),
-    end: endOfDay(b.endDate),
-    raw: b,
-  }));
+  // Find the current booking (one that covers today)
+  const currentBooking = bookings.find((b) => {
+    const bStart = startOfDay(b.startDate);
+    const bEnd = endOfDay(b.endDate);
+    return bStart <= now && bEnd >= now;
+  });
 
-  // Merge ranges that are overlapping / contiguous to compute continuous blocking chains.
-  const merged = [];
-  for (const r of ranges) {
-    if (merged.length === 0) {
-      merged.push({ start: r.start, end: r.end, ids: [r.id], raws: [r.raw] });
-      continue;
+  const isAvailableNow = !currentBooking;
+
+  // If there's a current booking, find when it ends and if there's a gap after it
+  let nextAvailableDate = null;
+  let returnInDays = 0;
+  let blockingBookings = [];
+
+  if (currentBooking) {
+    // Bike is currently rented
+    blockingBookings = [currentBooking];
+    
+    // Start looking for gaps - bike is available FROM the end date (same-day handover supported)
+    // If booking ends Jan 5, bike is available starting Jan 5
+    let checkDate = startOfDay(currentBooking.endDate);
+    
+    // Check if there are back-to-back bookings after the current one
+    // Find the first available gap
+    let foundGap = false;
+    let iterations = 0;
+    const maxIterations = 365; // Safety limit - don't look more than a year ahead
+    
+    while (!foundGap && iterations < maxIterations) {
+      iterations++;
+      
+      // Check if checkDate falls within any existing booking
+      // With same-day handover: a date is blocked if a booking STARTS on or before it
+      // AND ENDS AFTER it (not on the same day)
+      const conflictingBooking = bookings.find((b) => {
+        if (b.id === currentBooking.id) return false; // Skip current booking
+        const bStart = startOfDay(b.startDate);
+        const bEnd = startOfDay(b.endDate); // Compare start of end day
+        // Blocked if booking starts on/before checkDate AND ends AFTER checkDate
+        return bStart <= checkDate && bEnd > checkDate;
+      });
+      
+      if (conflictingBooking) {
+        // This date is also booked, move to end date of this booking (same-day handover)
+        blockingBookings.push(conflictingBooking);
+        checkDate = startOfDay(conflictingBooking.endDate);
+      } else {
+        // Found a gap!
+        foundGap = true;
+        nextAvailableDate = checkDate;
+      }
     }
-    const last = merged[merged.length - 1];
-    // if r.start is <= last.end + 1ms (overlap/contiguous) -> merge
-    if (r.start.getTime() <= last.end.getTime() + 1) {
-      if (r.end > last.end) last.end = r.end;
-      last.ids.push(r.id);
-      last.raws.push(r.raw);
-    } else {
-      // non-overlapping -> start new chain
-      merged.push({ start: r.start, end: r.end, ids: [r.id], raws: [r.raw] });
+    
+    if (nextAvailableDate) {
+      returnInDays = Math.max(1, Math.ceil((startOfDay(nextAvailableDate) - todayStart) / MS_PER_DAY));
     }
   }
 
-  // find the chain of interest:
-  let chosenChain = merged.find((c) => c.start <= now && c.end >= now);
-  if (!chosenChain) chosenChain = merged[0];
-
-  // currentBooking: if any booking actually covers now (single booking)
-  const currentBooking = bookings.find(
-    (b) => startOfDay(b.startDate) <= now && endOfDay(b.endDate) >= now
-  );
-
-  const chainEnd = chosenChain.end;
-  const nextAvailableDate = chainEnd > now ? nextDay(chainEnd) : null;
-  const returnInDays = nextAvailableDate
-    ? Math.ceil((startOfDay(nextAvailableDate) - startOfDay(now)) / MS_PER_DAY)
-    : 0;
-
   return {
     bikeId,
-    isAvailableNow: !currentBooking,
+    isAvailableNow,
     nextAvailableDate: nextAvailableDate ? nextAvailableDate.toISOString() : null,
     currentBooking: currentBooking
       ? {
@@ -167,10 +184,11 @@ const computeAvailability = async (bikeId, orgId) => {
         }
       : null,
     returnInDays,
-    blockingBookings: chosenChain.raws.map((b) => ({
+    blockingBookings: blockingBookings.map((b) => ({
       id: b.id,
-      startDate: startOfDay(b.startDate).toISOString(),
-      endDate: endOfDay(b.endDate).toISOString(),
+      customerName: b.customerName,
+      startDate: b.startDate,
+      endDate: b.endDate,
     })),
   };
 };
@@ -347,17 +365,51 @@ export const createBooking = async (req, res) => {
     // Auto-fix bike status (best-effort)
     await autoFixBikeStatus(bikeId, orgId);
 
-    // Overlap check (inclusive) — exclude RETURNED and deleted bookings
+    // Overlap check with SAME-DAY HANDOVER support:
+    // - Booking A: Jan 1-5 (ends Jan 5)
+    // - Booking B: Jan 5-10 (starts Jan 5) 
+    // These should be ALLOWED (same-day handover)
+    //
+    // The challenge: dates are stored with times (00:00:00 for start, 23:59:59 for end)
+    // and converted to UTC. So "Jan 5 end" in IST might be "Jan 5 18:30 UTC"
+    // and "Jan 5 start" in IST might be "Jan 4 18:30 UTC".
+    //
+    // Solution: Compare existing.endDate against nextDay(new.startDate)
+    // If existing ends Jan 5 and new starts Jan 5:
+    //   - existing.endDate = Jan 5 23:59:59 local
+    //   - nextDay(new.startDate) = Jan 6 00:00:00 local
+    //   - Jan 5 < Jan 6, so no overlap ✓
+    const nextDayOfNewStart = nextDay(startDate);
+    
     const overlap = await prisma.booking.findFirst({
       where: {
         bikeId,
         organizationId: orgId,
         status: { in: ["ACTIVE", "UPCOMING"] },
         isDeleted: false,
-        AND: [{ startDate: { lte: endDate } }, { endDate: { gte: startDate } }],
+        AND: [
+          { startDate: { lte: endDate } },       // existing starts before or when new ends
+          { endDate: { gte: nextDayOfNewStart } }, // existing ends ON or AFTER the day AFTER new starts
+        ],
       },
       orderBy: { startDate: "asc" },
     });
+    
+    // Debug logging for overlap detection
+    if (overlap) {
+      console.log("[Booking] Overlap detected:", {
+        newBooking: { 
+          startDate: startDate.toISOString(), 
+          endDate: endDate.toISOString(),
+          nextDayOfStart: nextDayOfNewStart.toISOString()
+        },
+        existingBooking: { 
+          id: overlap.id,
+          startDate: overlap.startDate, 
+          endDate: overlap.endDate 
+        },
+      });
+    }
 
     if (overlap) {
       // compute availability to provide helpful info to frontend
@@ -501,6 +553,8 @@ export const updateBooking = async (req, res) => {
         }
 
         // Overlap check only if dates are actually being changed
+        // Same-day handover supported: compare against nextDay of new start
+        const nextDayOfNewStart = nextDay(newStart);
         const overlap = await prisma.booking.findFirst({
           where: {
             bikeId: existing.bikeId,
@@ -508,7 +562,10 @@ export const updateBooking = async (req, res) => {
             id: { not: id },
             status: { in: ["ACTIVE", "UPCOMING"] },
             isDeleted: false,
-            AND: [{ startDate: { lte: newEnd } }, { endDate: { gte: newStart } }],
+            AND: [
+              { startDate: { lte: newEnd } },
+              { endDate: { gte: nextDayOfNewStart } },
+            ],
           },
         });
 
@@ -557,15 +614,126 @@ export const updateBooking = async (req, res) => {
   }
 };
 
-/** MARK AS RETURNED */
+/** DELIVER BIKE - Record handover details */
+export const deliverBike = async (req, res) => {
+  try {
+    const orgId = req.organizationId;
+    const accountId = req.accountId;
+    const id = req.params.id;
+    const {
+      helmetsGiven,
+      fuelLevel,
+      odometerReading,
+      existingDamages,
+      idVerified,
+      securityDeposit,
+    } = req.body;
+
+    // Validate required fields
+    if (helmetsGiven === undefined || !fuelLevel || odometerReading === undefined) {
+      return errorResponse(
+        res,
+        "Helmets count, fuel level, and odometer reading are required",
+        ERROR_CODES.MISSING_FIELDS,
+        400
+      );
+    }
+
+    // Validate fuel level enum
+    const validFuelLevels = ["FULL", "THREE_QUARTER", "HALF", "QUARTER", "LOW"];
+    if (!validFuelLevels.includes(fuelLevel)) {
+      return errorResponse(
+        res,
+        "Invalid fuel level. Must be one of: FULL, THREE_QUARTER, HALF, QUARTER, LOW",
+        ERROR_CODES.VALIDATION_ERROR,
+        400
+      );
+    }
+
+    const booking = await prisma.booking.findFirst({
+      where: { id, organizationId: orgId, isDeleted: false },
+      include: { bike: true },
+    });
+
+    if (!booking) {
+      return notFoundResponse(res, "Booking");
+    }
+
+    // Check if booking is already delivered
+    if (booking.deliveredAt) {
+      return errorResponse(
+        res,
+        "Bike has already been delivered for this booking",
+        ERROR_CODES.ALREADY_DELIVERED,
+        400
+      );
+    }
+
+    // Check if booking is in valid state for delivery (UPCOMING or ACTIVE without delivery)
+    if (booking.status === "RETURNED" || booking.status === "CANCELLED") {
+      return errorResponse(
+        res,
+        "Cannot deliver bike for a returned or cancelled booking",
+        ERROR_CODES.INVALID_STATUS,
+        400
+      );
+    }
+
+    const now = new Date();
+
+    // Update booking with delivery details
+    const updatedBooking = await prisma.booking.update({
+      where: { id },
+      data: {
+        helmetsGiven: Number(helmetsGiven),
+        fuelLevelStart: fuelLevel,
+        odometerStart: Number(odometerReading),
+        existingDamages: existingDamages?.trim() || null,
+        deliveredAt: now,
+        deliveredById: accountId,
+        idVerified: Boolean(idVerified),
+        securityDeposit: securityDeposit ? Number(securityDeposit) : null,
+        status: "ACTIVE", // Automatically set to ACTIVE on delivery
+      },
+      include: { bike: true },
+    });
+
+    // Update bike status to RENTED
+    await prisma.bike.update({
+      where: { id: booking.bikeId },
+      data: { status: "RENTED" },
+    });
+
+    return successResponse(
+      res,
+      updatedBooking,
+      "Bike delivered successfully"
+    );
+  } catch (err) {
+    console.error("Error delivering bike:", err);
+    return serverErrorResponse(res, err);
+  }
+};
+
+/** MARK AS RETURNED - With return details */
 export const markReturned = async (req, res) => {
   try {
     const orgId = req.organizationId;
+    const accountId = req.accountId;
     const id = req.params.id;
     const { 
       paidAmount: additionalPaidAmount,
       finesAmount,
       finesNotes,
+      // New return details
+      helmetsReturned,
+      fuelLevel,
+      odometerReading,
+      newDamages,
+      fuelCharge,
+      damageCharge,
+      extraKmsCharge,
+      lateFee,
     } = req.body;
 
     const booking = await prisma.booking.findFirst({
@@ -583,7 +751,6 @@ export const markReturned = async (req, res) => {
     const returnDay = startOfDay(now);
 
     // Calculate overdue days: if return date is after original end date
-    // Example: endDay = Dec 9, returnDay = Dec 11 → overdueDays = 2 (Dec 10, Dec 11)
     const overdueDays = returnDay > originalEndDay 
       ? Math.floor((returnDay - originalEndDay) / MS_PER_DAY)
       : 0;
@@ -596,9 +763,16 @@ export const markReturned = async (req, res) => {
     // Calculate fines amount (optional)
     const fines = finesAmount ? Number(finesAmount) : 0;
 
-    // Calculate new total amount (original + overdue fee + fines)
+    // Calculate extra charges from return details
+    const fuelChargeAmount = fuelCharge ? Number(fuelCharge) : 0;
+    const damageChargeAmount = damageCharge ? Number(damageCharge) : 0;
+    const extraKmsChargeAmount = extraKmsCharge ? Number(extraKmsCharge) : 0;
+    const lateFeeAmount = lateFee ? Number(lateFee) : overdueFee;
+
+    // Calculate new total amount (original + all charges)
     const originalTotal = booking.totalAmount || 0;
-    const newTotalAmount = originalTotal + overdueFee + fines;
+    const totalExtraCharges = fuelChargeAmount + damageChargeAmount + extraKmsChargeAmount + lateFeeAmount + fines;
+    const newTotalAmount = originalTotal + totalExtraCharges;
 
     // Calculate new paid amount (existing + additional payment)
     const existingPaid = booking.paidAmount || 0;
@@ -612,6 +786,22 @@ export const markReturned = async (req, res) => {
       ? `${existingNotes ? existingNotes + "\n\n" : ""}Fines/Damages: ${finesNotesText} (₹${fines.toFixed(2)})`
       : existingNotes;
 
+    // Validate fuel level if provided
+    const validFuelLevels = ["FULL", "THREE_QUARTER", "HALF", "QUARTER", "LOW"];
+    if (fuelLevel && !validFuelLevels.includes(fuelLevel)) {
+      return errorResponse(
+        res,
+        "Invalid fuel level. Must be one of: FULL, THREE_QUARTER, HALF, QUARTER, LOW",
+        ERROR_CODES.VALIDATION_ERROR,
+        400
+      );
+    }
+
+    // Calculate KMs driven if both odometer readings exist
+    const kmsUsed = (odometerReading && booking.odometerStart) 
+      ? Number(odometerReading) - booking.odometerStart 
+      : null;
+
     const updatedBooking = await prisma.booking.update({
       where: { id },
       data: {
@@ -620,6 +810,17 @@ export const markReturned = async (req, res) => {
         totalAmount: newTotalAmount,
         paidAmount: newPaidAmount,
         notes: updatedNotes,
+        // Return details
+        helmetsReturned: helmetsReturned !== undefined ? Number(helmetsReturned) : booking.helmetsGiven,
+        fuelLevelEnd: fuelLevel || null,
+        odometerEnd: odometerReading ? Number(odometerReading) : null,
+        newDamages: newDamages?.trim() || null,
+        returnedAt: now,
+        receivedById: accountId,
+        fuelCharge: fuelChargeAmount || null,
+        damageCharge: damageChargeAmount || null,
+        extraKmsCharge: extraKmsChargeAmount || null,
+        lateFee: lateFeeAmount || null,
       },
       include: { bike: true },
     });
@@ -637,10 +838,15 @@ export const markReturned = async (req, res) => {
         booking: updatedBooking,
         bike: updatedBike,
         overdueDays,
-        overdueFee,
+        overdueFee: lateFeeAmount,
         finesAmount: fines,
+        fuelCharge: fuelChargeAmount,
+        damageCharge: damageChargeAmount,
+        extraKmsCharge: extraKmsChargeAmount,
+        kmsUsed,
         originalTotalAmount: originalTotal,
         newTotalAmount,
+        totalExtraCharges,
       },
       "Booking marked as returned"
     );

@@ -61,6 +61,16 @@ async function autoFixBikeStatus(bikeId, orgId) {
 }
 
 /**
+ * Process items in batches to avoid exhausting database connections
+ */
+async function processBatch(items, batchSize, asyncFn) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await Promise.all(batch.map(asyncFn));
+  }
+}
+
+/**
  * GET ALL BIKES (ORG SCOPED)
  */
 export const getBikes = async (req, res) => {
@@ -78,8 +88,8 @@ export const getBikes = async (req, res) => {
       select: { id: true },
     });
     
-    // Run autofix for all bikes and wait for completion
-    await Promise.all(allBikes.map((b) => autoFixBikeStatus(b.id, orgId)));
+    // Run autofix for bikes in batches of 5 to avoid exhausting DB connections
+    await processBatch(allBikes, 5, (b) => autoFixBikeStatus(b.id, orgId));
 
     // Build where clause
     const where = {

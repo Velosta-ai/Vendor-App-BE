@@ -33,6 +33,14 @@ enum PaymentMethod {
   BANK_TRANSFER
 }
 
+enum FuelLevel {
+  FULL
+  THREE_QUARTER
+  HALF
+  QUARTER
+  LOW
+}
+
 //
 // ─── ORGANIZATION & ACCOUNTS ───────────────────────────────────────────
 //
@@ -183,6 +191,28 @@ model Booking {
   // Payment tracking
   paymentMethod PaymentMethod?
   paymentNotes  String?
+  
+  // ─── DELIVERY DETAILS (when bike is handed over) ───
+  helmetsGiven      Int?          // Number of helmets given
+  fuelLevelStart    FuelLevel?    // Fuel level at delivery
+  odometerStart     Float?        // KM reading at delivery
+  existingDamages   String?       // Notes about existing scratches/damages
+  deliveredAt       DateTime?     // When bike was delivered
+  deliveredById     String?       // Staff who delivered
+  idVerified        Boolean       @default(false) // Customer ID verified
+  securityDeposit   Float?        // Security deposit collected
+  
+  // ─── RETURN DETAILS (when bike is returned) ───
+  helmetsReturned   Int?          // Number of helmets returned
+  fuelLevelEnd      FuelLevel?    // Fuel level at return
+  odometerEnd       Float?        // KM reading at return
+  newDamages        String?       // Any new damages found
+  returnedAt        DateTime?     // When bike was returned
+  receivedById      String?       // Staff who received
+  fuelCharge        Float?        // Charge for fuel difference
+  damageCharge      Float?        // Charge for damages
+  extraKmsCharge    Float?        // Charge for extra KMs (if applicable)
+  lateFee           Float?        // Late return fee
   
   // Soft delete
   isDeleted     Boolean       @default(false)
