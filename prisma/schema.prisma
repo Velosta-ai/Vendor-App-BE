@@ -202,6 +202,12 @@ model Booking {
   idVerified        Boolean       @default(false) // Customer ID verified
   securityDeposit   Float?        // Security deposit collected
   
+  // ─── CUSTOMER DOCUMENTS (uploaded during delivery) ───
+  customerIdFront   String?       // S3 URL - Customer ID front photo
+  customerIdBack    String?       // S3 URL - Customer ID back photo
+  customerPhoto     String?       // S3 URL - Customer photo (optional)
+  bikePhotosStart   String[]      @default([]) // S3 URLs - Bike condition photos at delivery
+  
   // ─── RETURN DETAILS (when bike is returned) ───
   helmetsReturned   Int?          // Number of helmets returned
   fuelLevelEnd      FuelLevel?    // Fuel level at return
@@ -213,6 +219,7 @@ model Booking {
   damageCharge      Float?        // Charge for damages
   extraKmsCharge    Float?        // Charge for extra KMs (if applicable)
   lateFee           Float?        // Late return fee
+  bikePhotosEnd     String[]      @default([]) // S3 URLs - Bike condition photos at return
   
   // Soft delete
   isDeleted     Boolean       @default(false)

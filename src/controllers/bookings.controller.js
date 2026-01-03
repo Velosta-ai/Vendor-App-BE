@@ -627,6 +627,11 @@ export const deliverBike = async (req, res) => {
       existingDamages,
       idVerified,
       securityDeposit,
+      // Document URLs (uploaded via /api/upload/image)
+      customerIdFront,
+      customerIdBack,
+      customerPhoto,
+      bikePhotos, // Array of URLs
     } = req.body;
 
     // Validate required fields
@@ -694,6 +699,11 @@ export const deliverBike = async (req, res) => {
         idVerified: Boolean(idVerified),
         securityDeposit: securityDeposit ? Number(securityDeposit) : null,
         status: "ACTIVE", // Automatically set to ACTIVE on delivery
+        // Document URLs
+        customerIdFront: customerIdFront || null,
+        customerIdBack: customerIdBack || null,
+        customerPhoto: customerPhoto || null,
+        bikePhotosStart: Array.isArray(bikePhotos) ? bikePhotos : [],
       },
       include: { bike: true },
     });

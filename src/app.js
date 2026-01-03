@@ -26,9 +26,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Body parsing with size limits
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// Body parsing with size limits (increased for image uploads)
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Trust proxy for rate limiting behind reverse proxy
 app.set("trust proxy", 1);
